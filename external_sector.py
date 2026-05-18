@@ -11,16 +11,36 @@ import matplotlib.pyplot as plt
 from pathlib import Path
 
 
-PROJECT_DIR = Path(r"C:\Users\hp\Documents\somali economic outlook report")
+
+# ============================================================
+# PATHS / DIRECTORIES
+# ============================================================
+
+# ============================================================
+# PATHS / DIRECTORIES
+# ============================================================
+
+from pathlib import Path
+
+# Root project folder
+PROJECT_DIR = Path(__file__).parent
+
+# Main Excel data file
 DATA_FILE = PROJECT_DIR / "Data template.xlsx"
 
-EXTERNAL_SHEET = "External Sector Raw"
+# Sheet names
 REAL_SHEET = "Real Sector Raw"
+FISCAL_SHEET = "Fiscal Sector Raw"
+MONETARY_SHEET = "Monetary Financial Raw"
+EXTERNAL_SHEET = "External Sector Raw"
 
+# Output folders
 OUTPUT_DIR = PROJECT_DIR / "outputs"
 CHART_DIR = OUTPUT_DIR / "charts"
 TABLE_DIR = OUTPUT_DIR / "tables"
 
+# Create folders automatically
+OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 CHART_DIR.mkdir(parents=True, exist_ok=True)
 TABLE_DIR.mkdir(parents=True, exist_ok=True)
 
