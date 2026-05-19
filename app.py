@@ -1,7 +1,7 @@
 # ============================================================
 # app.py
 # CBS Somalia Economic Outlook System
-# Streamlit deployment app with role-based access
+# Streamlit deployment app with login + role-based access
 # ============================================================
 
 import streamlit as st
@@ -51,7 +51,7 @@ st.set_page_config(
 
 
 # ============================================================
-# LOGIN AND ROLE ACCESS
+# AUTHORIZED USERS
 # ============================================================
 
 USERS = {
@@ -65,15 +65,21 @@ USERS = {
     },
 }
 
+
+# ============================================================
+# LOGIN GATE
+# ============================================================
+
 if not st.user.is_logged_in:
     st.title("CBS Somalia Economic Outlook System")
-    st.info("Please log in with your authorized email to access the system.")
+    st.info("Please log in with your authorized Google account.")
     st.button("Log in", on_click=st.login)
     st.stop()
 
 user_email = st.user.get("email", "").lower()
 
 if user_email not in USERS:
+    st.title("CBS Somalia Economic Outlook System")
     st.error("You are logged in, but you are not authorized to access this system.")
     st.write(f"Logged in as: `{user_email}`")
     st.button("Log out", on_click=st.logout)
@@ -81,6 +87,7 @@ if user_email not in USERS:
 
 USER_NAME = USERS[user_email]["name"]
 USER_ROLE = USERS[user_email]["role"]
+IS_ADMIN = USER_ROLE == "admin"
 
 
 # ============================================================
@@ -108,7 +115,7 @@ st.caption("Macro diagnostics, sector dashboards, and downloadable analytical ou
 
 
 # ============================================================
-# SIDEBAR: USER AND DATA CONFIGURATION
+# SIDEBAR: USER + DATA
 # ============================================================
 
 with st.sidebar:
@@ -119,7 +126,7 @@ with st.sidebar:
     st.markdown("---")
     st.header("Data configuration")
 
-if USER_ROLE == "admin":
+if IS_ADMIN:
     uploaded_file = st.sidebar.file_uploader(
         "Upload updated Somalia data template",
         type=["xlsx"],
@@ -201,6 +208,11 @@ def show_figure(fig):
 
 def select_year_range(all_years):
     all_years = sorted([int(y) for y in all_years])
+
+    if len(all_years) < 2:
+        st.error("At least two years of data are required.")
+        st.stop()
+
     min_year = min(all_years)
     max_year = max(all_years)
 
@@ -219,7 +231,7 @@ def select_year_range(all_years):
     return selected_years
 
 
-def load_all_years(data_file):
+def load_all_data(data_file):
     real_raw, real_years = load_real_sheet(data_file, "Real Sector Raw")
     fiscal_raw, fiscal_years = load_fiscal_sheet(data_file, "Fiscal Sector Raw")
     monetary_raw, monetary_years = load_monetary_sheet(data_file, "Monetary Financial Raw")
@@ -237,12 +249,18 @@ def load_all_years(data_file):
     }
 
 
+def ensure_enough_years(years, sector_name):
+    if len(years) < 2:
+        st.warning(f"{sector_name} has fewer than two valid years in the selected range.")
+        st.stop()
+
+
 # ============================================================
 # MAIN APP
 # ============================================================
 
 try:
-    loaded = load_all_years(DATA_FILE)
+    loaded = load_all_data(DATA_FILE)
 
     all_years = sorted(
         set(loaded["real_years"])
@@ -256,6 +274,7 @@ try:
     selected_years = select_year_range(all_years)
 
     config = SECTOR_CONFIG[sector]
+
     st.subheader(config["title"])
     st.caption(
         f"Showing {min(selected_years)}–{max(selected_years)}. "
@@ -264,6 +283,8 @@ try:
 
     if sector == "Real Sector":
         years = sorted(set(loaded["real_years"]).intersection(selected_years))
+        ensure_enough_years(years, sector)
+
         indicators = compute_real_sector_indicators(loaded["real_raw"], years)
         summary = create_real_summary(indicators, years)
         fig = plot_real_sector_dashboard(indicators, years, save_path=None)
@@ -274,6 +295,8 @@ try:
             .intersection(set(loaded["real_years"]))
             .intersection(selected_years)
         )
+        ensure_enough_years(years, sector)
+
         indicators = compute_fiscal_indicators(
             loaded["fiscal_raw"],
             loaded["real_raw"],
@@ -288,6 +311,8 @@ try:
             .intersection(set(loaded["real_years"]))
             .intersection(selected_years)
         )
+        ensure_enough_years(years, sector)
+
         indicators = compute_monetary_indicators(
             loaded["monetary_raw"],
             loaded["real_raw"],
@@ -302,6 +327,8 @@ try:
             .intersection(set(loaded["real_years"]))
             .intersection(selected_years)
         )
+        ensure_enough_years(years, sector)
+
         indicators = compute_external_indicators(
             loaded["external_raw"],
             loaded["real_raw"],
@@ -309,10 +336,6 @@ try:
         )
         summary = create_external_summary(indicators, years)
         fig = plot_external_dashboard(indicators, years, save_path=None)
-
-    if len(years) < 2:
-        st.warning("The selected sector has fewer than two valid years in this range.")
-        st.stop()
 
     show_figure(fig)
 
@@ -341,11 +364,12 @@ try:
     with st.expander("View summary table used for dashboard calculations"):
         st.dataframe(summary, use_container_width=True)
 
-    if USER_ROLE == "admin":
+    if IS_ADMIN:
         with st.expander("Admin information"):
             st.write("Current data source:", DATA_FILE)
             st.write("Available years:", all_years)
-            st.write("Selected years:", years)
+            st.write("Selected sector years:", years)
+            st.write("Current user:", user_email)
 
     plt.close(fig)
 
