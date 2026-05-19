@@ -1,12 +1,13 @@
 # ============================================================
 # app.py
 # CBS Somalia Economic Outlook System
-# Streamlit deployment app with login + role-based access
+# Streamlit app with simple password login + role-based access
 # ============================================================
 
 import streamlit as st
 from pathlib import Path
 from io import BytesIO
+
 import pandas as pd
 import matplotlib.pyplot as plt
 
@@ -51,42 +52,70 @@ st.set_page_config(
 
 
 # ============================================================
-# AUTHORIZED USERS
+# SIMPLE PASSWORD LOGIN
 # ============================================================
 
+# For immediate deployment stability, this uses simple password login.
+# Later, these passwords can be moved fully into Streamlit Secrets.
 USERS = {
     "mutukucmm@gmail.com": {
         "name": "Admin",
         "role": "admin",
+        "password": st.secrets.get("ADMIN_PASSWORD", "admin123"),
     },
     "anisa.osman@centralbank.gov.so": {
         "name": "Anisa Osman",
         "role": "viewer",
+        "password": st.secrets.get("VIEWER_PASSWORD", "viewer123"),
     },
 }
 
 
-# ============================================================
-# LOGIN GATE
-# ============================================================
+def login_gate():
+    """Stop the app until a valid user logs in."""
 
-if not st.user.is_logged_in:
-    st.title("CBS Somalia Economic Outlook System")
-    st.info("Please log in with your authorized Google account.")
-    st.button("Log in", on_click=st.login)
-    st.stop()
+    if "logged_in" not in st.session_state:
+        st.session_state["logged_in"] = False
 
-user_email = st.user.get("email", "").lower()
+    if "current_user" not in st.session_state:
+        st.session_state["current_user"] = ""
 
-if user_email not in USERS:
-    st.title("CBS Somalia Economic Outlook System")
-    st.error("You are logged in, but you are not authorized to access this system.")
-    st.write(f"Logged in as: `{user_email}`")
-    st.button("Log out", on_click=st.logout)
-    st.stop()
+    # If a stale/blank user exists, reset safely.
+    current_user = st.session_state.get("current_user", "")
+    if st.session_state.get("logged_in") and current_user not in USERS:
+        st.session_state["logged_in"] = False
+        st.session_state["current_user"] = ""
 
-USER_NAME = USERS[user_email]["name"]
-USER_ROLE = USERS[user_email]["role"]
+    if not st.session_state["logged_in"]:
+        st.title("CBS Somalia Economic Outlook System")
+        st.info("Please log in with your authorized email and password.")
+
+        with st.form("login_form", clear_on_submit=False):
+            email = st.text_input("Email").strip().lower()
+            password = st.text_input("Password", type="password")
+            submitted = st.form_submit_button("Log in")
+
+        if submitted:
+            if email in USERS and password == USERS[email]["password"]:
+                st.session_state["logged_in"] = True
+                st.session_state["current_user"] = email
+                st.rerun()
+            else:
+                st.error("Invalid email or password.")
+
+        st.stop()
+
+    user_email = st.session_state.get("current_user", "")
+
+    if user_email not in USERS:
+        st.session_state["logged_in"] = False
+        st.session_state["current_user"] = ""
+        st.rerun()
+
+    return user_email, USERS[user_email]["name"], USERS[user_email]["role"]
+
+
+USER_EMAIL, USER_NAME, USER_ROLE = login_gate()
 IS_ADMIN = USER_ROLE == "admin"
 
 
@@ -115,13 +144,17 @@ st.caption("Macro diagnostics, sector dashboards, and downloadable analytical ou
 
 
 # ============================================================
-# SIDEBAR: USER + DATA
+# SIDEBAR USER + DATA CONFIGURATION
 # ============================================================
 
 with st.sidebar:
     st.success(f"Logged in: {USER_NAME}")
     st.caption(f"Role: {USER_ROLE}")
-    st.button("Log out", on_click=st.logout)
+
+    if st.button("Log out"):
+        st.session_state["logged_in"] = False
+        st.session_state["current_user"] = ""
+        st.rerun()
 
     st.markdown("---")
     st.header("Data configuration")
@@ -213,13 +246,10 @@ def select_year_range(all_years):
         st.error("At least two years of data are required.")
         st.stop()
 
-    min_year = min(all_years)
-    max_year = max(all_years)
-
     start_year, end_year = st.sidebar.select_slider(
         "Select year range",
         options=all_years,
-        value=(min_year, max_year),
+        value=(min(all_years), max(all_years)),
     )
 
     selected_years = [y for y in all_years if start_year <= y <= end_year]
@@ -369,7 +399,7 @@ try:
             st.write("Current data source:", DATA_FILE)
             st.write("Available years:", all_years)
             st.write("Selected sector years:", years)
-            st.write("Current user:", user_email)
+            st.write("Current user:", USER_EMAIL)
 
     plt.close(fig)
 
