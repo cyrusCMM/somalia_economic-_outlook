@@ -63,8 +63,8 @@ USERS = {
         "role": "admin",
         "password": st.secrets.get("ADMIN_PASSWORD", "admin123"),
     },
-    "anisa.osman@centralbank.gov.so": {
-        "name": "Anisa Osman",
+    "anisaibrahim666@outlook.com": {
+        "name": "Anisa Ibrahim",
         "role": "viewer",
         "password": st.secrets.get("VIEWER_PASSWORD", "viewer123"),
     },
