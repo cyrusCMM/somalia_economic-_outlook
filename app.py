@@ -2,14 +2,17 @@
 # app.py
 # CBS Somalia Economic Outlook System
 # Streamlit app with simple password login + role-based access
+# Individual chart downloads added
 # ============================================================
 
 import streamlit as st
 from pathlib import Path
 from io import BytesIO
+import zipfile
 
 import pandas as pd
 import matplotlib.pyplot as plt
+from matplotlib.transforms import Bbox
 
 from real_sector import (
     load_sector_sheet as load_real_sheet,
@@ -55,8 +58,6 @@ st.set_page_config(
 # SIMPLE PASSWORD LOGIN
 # ============================================================
 
-# For immediate deployment stability, this uses simple password login.
-# Later, these passwords can be moved fully into Streamlit Secrets.
 USERS = {
     "mutukucmm@gmail.com": {
         "name": "Admin",
@@ -72,16 +73,14 @@ USERS = {
 
 
 def login_gate():
-    """Stop the app until a valid user logs in."""
-
     if "logged_in" not in st.session_state:
         st.session_state["logged_in"] = False
 
     if "current_user" not in st.session_state:
         st.session_state["current_user"] = ""
 
-    # If a stale/blank user exists, reset safely.
     current_user = st.session_state.get("current_user", "")
+
     if st.session_state.get("logged_in") and current_user not in USERS:
         st.session_state["logged_in"] = False
         st.session_state["current_user"] = ""
@@ -185,21 +184,25 @@ SECTOR_CONFIG = {
         "title": "Real Sector Diagnostics",
         "summary_name": "real_sector_summary.xlsx",
         "figure_name": "real_sector_dashboard.png",
+        "zip_name": "real_sector_individual_charts.zip",
     },
     "Fiscal Sector": {
         "title": "Fiscal Sector Diagnostics",
         "summary_name": "fiscal_sector_summary.xlsx",
         "figure_name": "fiscal_sector_dashboard.png",
+        "zip_name": "fiscal_sector_individual_charts.zip",
     },
     "Monetary and Financial Sector": {
         "title": "Monetary and Financial Sector Diagnostics",
         "summary_name": "monetary_sector_summary.xlsx",
         "figure_name": "monetary_sector_dashboard.png",
+        "zip_name": "monetary_sector_individual_charts.zip",
     },
     "External Sector": {
         "title": "External Sector Diagnostics",
         "summary_name": "external_sector_summary.xlsx",
         "figure_name": "external_sector_dashboard.png",
+        "zip_name": "external_sector_individual_charts.zip",
     },
 }
 
@@ -224,6 +227,101 @@ def dataframe_to_excel_bytes(df, sheet_name="Summary"):
 def figure_to_png_bytes(fig):
     output = BytesIO()
     fig.savefig(output, format="png", dpi=300, bbox_inches="tight")
+    output.seek(0)
+    return output
+
+
+def safe_file_name(text):
+    text = str(text).strip().lower()
+    for ch in [" ", "/", "\\", ":", ";", ",", ".", "(", ")", "%", "&"]:
+        text = text.replace(ch, "_")
+    while "__" in text:
+        text = text.replace("__", "_")
+    return text.strip("_") or "chart"
+
+
+def individual_chart_pngs(fig):
+    """
+    Export each subplot/chart as its own PNG by cropping the full dashboard figure.
+
+    This keeps the original chart formatting exactly as shown in the dashboard.
+    It groups twin axes together so charts with secondary axes are exported as one image.
+    Table panels are skipped.
+    """
+    fig.canvas.draw()
+    renderer = fig.canvas.get_renderer()
+
+    axes = fig.get_axes()
+    groups = {}
+
+    for ax in axes:
+        title = ax.get_title() or ""
+
+        # Skip empty/table-only axes.
+        if not ax.has_data():
+            continue
+
+        # Group axes with the same subplot position, including twin axes.
+        pos = ax.get_position()
+        key = (
+            round(pos.x0, 3),
+            round(pos.y0, 3),
+            round(pos.x1, 3),
+            round(pos.y1, 3),
+        )
+
+        if key not in groups:
+            groups[key] = {
+                "axes": [],
+                "title": title,
+            }
+
+        groups[key]["axes"].append(ax)
+
+        if title and not groups[key]["title"]:
+            groups[key]["title"] = title
+
+    chart_files = []
+
+    for i, group in enumerate(groups.values(), start=1):
+        bboxes = []
+
+        for ax in group["axes"]:
+            try:
+                bboxes.append(ax.get_tightbbox(renderer))
+            except Exception:
+                pass
+
+        if not bboxes:
+            continue
+
+        bbox = Bbox.union(bboxes)
+        bbox_inches = bbox.transformed(fig.dpi_scale_trans.inverted())
+
+        title = group["title"] or f"chart_{i}"
+        file_name = f"{i:02d}_{safe_file_name(title)}.png"
+
+        output = BytesIO()
+        fig.savefig(
+            output,
+            format="png",
+            dpi=300,
+            bbox_inches=bbox_inches.expanded(1.12, 1.18),
+        )
+        output.seek(0)
+
+        chart_files.append((file_name, output.getvalue()))
+
+    return chart_files
+
+
+def charts_zip_bytes(chart_files):
+    output = BytesIO()
+
+    with zipfile.ZipFile(output, mode="w", compression=zipfile.ZIP_DEFLATED) as zf:
+        for file_name, file_bytes in chart_files:
+            zf.writestr(file_name, file_bytes)
+
     output.seek(0)
     return output
 
@@ -370,8 +468,9 @@ try:
     show_figure(fig)
 
     st.markdown("---")
+    st.subheader("Downloads")
 
-    col1, col2 = st.columns(2)
+    col1, col2, col3 = st.columns(3)
 
     with col1:
         excel_bytes = dataframe_to_excel_bytes(summary, sheet_name="Summary")
@@ -385,11 +484,38 @@ try:
     with col2:
         png_bytes = figure_to_png_bytes(fig)
         st.download_button(
-            label="Download dashboard PNG",
+            label="Download full dashboard PNG",
             data=png_bytes,
             file_name=config["figure_name"],
             mime="image/png",
         )
+
+    chart_files = individual_chart_pngs(fig)
+
+    with col3:
+        if chart_files:
+            zip_bytes = charts_zip_bytes(chart_files)
+            st.download_button(
+                label="Download all individual charts ZIP",
+                data=zip_bytes,
+                file_name=config["zip_name"],
+                mime="application/zip",
+            )
+        else:
+            st.warning("No individual charts found.")
+
+    with st.expander("Download individual charts one by one"):
+        if chart_files:
+            for file_name, file_bytes in chart_files:
+                st.download_button(
+                    label=f"Download {file_name}",
+                    data=file_bytes,
+                    file_name=file_name,
+                    mime="image/png",
+                    key=f"download_{sector}_{file_name}",
+                )
+        else:
+            st.info("No individual chart files available.")
 
     with st.expander("View summary table used for dashboard calculations"):
         st.dataframe(summary, use_container_width=True)
